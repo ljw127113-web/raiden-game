@@ -3,7 +3,7 @@ class RaidenGame {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.canvas.width = 2560;
+        this.canvas.width = 720;
         this.canvas.height = 1280;
         
         // 游戏状态
@@ -12,21 +12,36 @@ class RaidenGame {
         this.lives = 3;
         this.level = 1;
         
+        // 升级系统
+        this.coins = 0; // 金币数量
+        this.lightningLevel = 1; // 闪电等级
+        this.lightningUpgradeCost = 10; // 升级费用
+        
         // 游戏对象
         this.player = null;
         this.enemies = [];
         this.lightningWhips = [];
+        this.bullets = [];
         this.particles = [];
         this.stars = [];
         
         // 输入控制
         this.keys = {};
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.touchX = 0;
+        this.touchY = 0;
+        this.isMouseDown = false;
+        this.isTouchDown = false;
+        
         this.setupInput();
         
         // 游戏循环
         this.lastTime = 0;
         this.enemySpawnTimer = 0;
         this.enemySpawnInterval = 225; // 0.225秒生成一个敌人，约6.7倍数量（三分之二）
+        this.bulletSpawnTimer = 0;
+        this.bulletSpawnInterval = 100; // 0.1秒发射一颗子弹
         
         this.init();
     }
@@ -44,6 +59,9 @@ class RaidenGame {
         this.score = 0;
         this.lives = 3;
         this.level = 1;
+        this.coins = 0; // 重置金币
+        this.lightningLevel = 1; // 重置闪电等级
+        this.lightningUpgradeCost = 10; // 重置升级费用
         this.enemies = [];
         this.lightningWhips = [];
         this.particles = [];
@@ -102,7 +120,7 @@ class RaidenGame {
         if (this.gameState !== 'playing') return;
         
         // 更新玩家
-        this.player.update(deltaTime, this.keys);
+        this.player.update(deltaTime, this.keys, this);
         
         // 更新敌人
         this.updateEnemies(deltaTime);
@@ -110,11 +128,17 @@ class RaidenGame {
         // 更新闪电鞭
         this.updateLightningWhips(deltaTime);
         
+        // 更新子弹
+        this.updateBullets(deltaTime);
+        
         // 更新粒子效果
         this.updateParticles(deltaTime);
         
         // 生成敌人
         this.spawnEnemies(deltaTime);
+        
+        // 发射子弹
+        this.spawnBullets(deltaTime);
         
         // 碰撞检测
         this.checkCollisions();
@@ -132,6 +156,12 @@ class RaidenGame {
     updateLightningWhips(deltaTime) {
         this.lightningWhips.forEach(whip => {
             whip.update(deltaTime);
+        });
+    }
+    
+    updateBullets(deltaTime) {
+        this.bullets.forEach(bullet => {
+            bullet.update(deltaTime);
         });
     }
     
@@ -165,6 +195,19 @@ class RaidenGame {
         this.enemies.push(enemy);
     }
     
+    spawnBullets(deltaTime) {
+        this.bulletSpawnTimer += deltaTime;
+        if (this.bulletSpawnTimer >= this.bulletSpawnInterval) {
+            this.bulletSpawnTimer = 0;
+            this.spawnBullet();
+        }
+    }
+    
+    spawnBullet() {
+        const bullet = new Bullet(this.player.x, this.player.y - this.player.height / 2);
+        this.bullets.push(bullet);
+    }
+    
     checkCollisions() {
         // 闪电鞭与敌人碰撞
         this.lightningWhips.forEach(whip => {
@@ -173,6 +216,21 @@ class RaidenGame {
                     enemy.takeDamage(whip.damage);
                     if (enemy.isDead) {
                         this.score += enemy.scoreValue;
+                        this.createExplosion(enemy.x, enemy.y);
+                    }
+                }
+            });
+        });
+        
+        // 子弹与敌人碰撞
+        this.bullets.forEach((bullet, bulletIndex) => {
+            this.enemies.forEach(enemy => {
+                if (bullet.active && !enemy.isDead && bullet.checkCollision(enemy)) {
+                    enemy.takeDamage(bullet.damage);
+                    bullet.active = false; // 子弹击中后消失
+                    if (enemy.isDead) {
+                        this.score += enemy.scoreValue;
+                        this.coins += 1; // 每杀死一个敌人获得1金币
                         this.createExplosion(enemy.x, enemy.y);
                     }
                 }
@@ -198,9 +256,110 @@ class RaidenGame {
         }
     }
     
+    upgradeLightning() {
+        // 升级闪电伤害
+        if (this.coins >= this.lightningUpgradeCost) {
+            this.coins -= this.lightningUpgradeCost;
+            this.lightningLevel++;
+            this.lightningUpgradeCost = Math.floor(this.lightningUpgradeCost * 1.2); // 每次升级费用增加20%
+        }
+    }
+    
+    getLightningDamage() {
+        // 计算当前闪电伤害（基础伤害 * 等级加成）
+        const baseDamage = 2;
+        const levelMultiplier = 1 + (this.lightningLevel - 1) * 0.1; // 每级增加10%
+        return Math.floor(baseDamage * levelMultiplier);
+    }
+    
+    setupInput() {
+        // 键盘事件监听
+        document.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            
+            // 游戏状态控制
+            if (e.code === 'Space' || e.code === 'Enter') {
+                e.preventDefault();
+                if (this.gameState === 'menu' || this.gameState === 'gameOver') {
+                    this.startGame();
+                }
+            }
+            
+            // 升级控制
+            if (e.code === 'KeyU' && this.gameState === 'playing') {
+                this.upgradeLightning();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            this.keys[e.code] = false;
+        });
+        
+        // 鼠标事件监听
+        this.canvas.addEventListener('mousemove', (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            this.mouseX = e.clientX - rect.left;
+            this.mouseY = e.clientY - rect.top;
+        });
+        
+        this.canvas.addEventListener('mousedown', (e) => {
+            this.isMouseDown = true;
+            this.handleClick(e.clientX, e.clientY);
+        });
+        
+        this.canvas.addEventListener('mouseup', (e) => {
+            this.isMouseDown = false;
+        });
+        
+        // 触屏事件监听
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length > 0) {
+                const rect = this.canvas.getBoundingClientRect();
+                this.touchX = e.touches[0].clientX - rect.left;
+                this.touchY = e.touches[0].clientY - rect.top;
+                this.isTouchDown = true;
+                this.handleClick(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+        
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length > 0) {
+                const rect = this.canvas.getBoundingClientRect();
+                this.touchX = e.touches[0].clientX - rect.left;
+                this.touchY = e.touches[0].clientY - rect.top;
+            }
+        });
+        
+        this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            this.isTouchDown = false;
+        });
+    }
+    
+    handleClick(clientX, clientY) {
+        if (this.gameState !== 'playing') return;
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const clickX = clientX - rect.left;
+        const clickY = clientY - rect.top;
+        
+        // 检查是否点击了升级按钮
+        if (this.upgradeButton) {
+            if (clickX >= this.upgradeButton.x && 
+                clickX <= this.upgradeButton.x + this.upgradeButton.width &&
+                clickY >= this.upgradeButton.y && 
+                clickY <= this.upgradeButton.y + this.upgradeButton.height) {
+                this.upgradeLightning();
+            }
+        }
+    }
+    
     cleanup() {
         this.enemies = this.enemies.filter(enemy => !enemy.isDead && enemy.y < this.canvas.height + 100);
         this.lightningWhips = this.lightningWhips.filter(whip => whip.isActive);
+        this.bullets = this.bullets.filter(bullet => bullet.active);
         this.particles = this.particles.filter(particle => particle.isActive);
         
         // 清理玩家的闪电鞭引用
@@ -210,9 +369,8 @@ class RaidenGame {
     }
     
     render() {
-        // 创建拖尾效果
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        // 清除画布，避免残影
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
         // 绘制星空
         this.renderStars();
@@ -234,7 +392,7 @@ class RaidenGame {
     renderMenu() {
         // 绘制标题
         this.ctx.fillStyle = '#00ffff';
-        this.ctx.font = 'bold 80px Arial';
+        this.ctx.font = 'bold 36px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.shadowColor = '#00ffff';
         this.ctx.shadowBlur = 20;
@@ -242,15 +400,16 @@ class RaidenGame {
         
         // 绘制说明
         this.ctx.fillStyle = '#ffff00';
-        this.ctx.font = 'bold 40px Arial';
+        this.ctx.font = 'bold 20px Arial';
         this.ctx.shadowBlur = 10;
-        this.ctx.fillText('按空格键或回车键开始游戏', this.canvas.width / 2, this.canvas.height / 2 + 50);
+        this.ctx.fillText('按空格键或回车键开始游戏', this.canvas.width / 2, this.canvas.height / 2 - 20);
         
         this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 30px Arial';
+        this.ctx.font = 'bold 16px Arial';
         this.ctx.shadowBlur = 5;
-        this.ctx.fillText('WASD或方向键移动战机', this.canvas.width / 2, this.canvas.height / 2 + 120);
-        this.ctx.fillText('紫色闪电鞭会自动锁定敌人', this.canvas.width / 2, this.canvas.height / 2 + 170);
+        this.ctx.fillText('WASD或方向键移动战机', this.canvas.width / 2, this.canvas.height / 2 + 30);
+        this.ctx.fillText('紫色闪电鞭会自动锁定敌人', this.canvas.width / 2, this.canvas.height / 2 + 60);
+        this.ctx.fillText('杀死怪物获得金币，按U键升级闪电', this.canvas.width / 2, this.canvas.height / 2 + 90);
         
         this.ctx.shadowBlur = 0;
     }
@@ -271,6 +430,10 @@ class RaidenGame {
             whip.render(this.ctx);
         });
         
+        this.bullets.forEach(bullet => {
+            bullet.render(this.ctx);
+        });
+        
         this.particles.forEach(particle => {
             particle.render(this.ctx);
         });
@@ -283,21 +446,21 @@ class RaidenGame {
         
         // 绘制游戏结束文字
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.font = 'bold 80px Arial';
+        this.ctx.font = 'bold 36px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.shadowColor = '#ff0000';
         this.ctx.shadowBlur = 20;
-        this.ctx.fillText('游戏结束', this.canvas.width / 2, this.canvas.height / 2 - 50);
+        this.ctx.fillText('游戏结束', this.canvas.width / 2, this.canvas.height / 2 - 30);
         
         this.ctx.fillStyle = '#ffff00';
-        this.ctx.font = 'bold 40px Arial';
+        this.ctx.font = 'bold 20px Arial';
         this.ctx.shadowBlur = 10;
-        this.ctx.fillText(`最终分数: ${this.score}`, this.canvas.width / 2, this.canvas.height / 2 + 50);
+        this.ctx.fillText(`最终分数: ${this.score}`, this.canvas.width / 2, this.canvas.height / 2 + 20);
         
         this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 30px Arial';
+        this.ctx.font = 'bold 16px Arial';
         this.ctx.shadowBlur = 5;
-        this.ctx.fillText('按空格键或回车键重新开始', this.canvas.width / 2, this.canvas.height / 2 + 120);
+        this.ctx.fillText('按空格键或回车键重新开始', this.canvas.width / 2, this.canvas.height / 2 + 60);
         
         this.ctx.shadowBlur = 0;
     }
@@ -315,6 +478,75 @@ class RaidenGame {
         document.getElementById('score').textContent = this.score;
         document.getElementById('lives').textContent = this.player ? this.player.lives : 3;
         document.getElementById('level').textContent = this.level;
+        
+        // 渲染升级UI
+        this.renderUpgradeUI();
+    }
+    
+    renderUpgradeUI() {
+        if (this.gameState !== 'playing') return;
+        
+        // 计算右上角位置（竖屏模式）
+        const uiWidth = 250; // 进一步缩小UI宽度适应竖屏
+        const uiHeight = 100; // 保持UI高度
+        const uiX = this.canvas.width - uiWidth - 10; // 减少边距
+        const uiY = 20;
+        
+        // 绘制升级信息背景
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(uiX, uiY, uiWidth, uiHeight);
+        
+        // 绘制边框
+        this.ctx.strokeStyle = '#00ffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(uiX, uiY, uiWidth, uiHeight);
+        
+        // 绘制金币信息
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.font = 'bold 16px Arial';
+        this.ctx.textAlign = 'left';
+        this.ctx.shadowColor = '#ffff00';
+        this.ctx.shadowBlur = 5;
+        this.ctx.fillText(`金币: ${this.coins}`, uiX + 8, uiY + 25);
+        
+        // 绘制闪电等级信息
+        this.ctx.fillStyle = '#ff00ff';
+        this.ctx.fillText(`闪电等级: ${this.lightningLevel}`, uiX + 8, uiY + 50);
+        
+        // 绘制升级费用和提示
+        this.ctx.fillStyle = this.coins >= this.lightningUpgradeCost ? '#00ff00' : '#ff0000';
+        this.ctx.fillText(`升级费用: ${this.lightningUpgradeCost}`, uiX + 8, uiY + 75);
+        
+        // 绘制升级按钮
+        const buttonX = uiX + 8;
+        const buttonY = uiY + 80;
+        const buttonWidth = uiWidth - 16;
+        const buttonHeight = 15;
+        
+        // 按钮背景
+        this.ctx.fillStyle = this.coins >= this.lightningUpgradeCost ? '#00aa00' : '#666666';
+        this.ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        // 按钮边框
+        this.ctx.strokeStyle = this.coins >= this.lightningUpgradeCost ? '#00ff00' : '#999999';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        // 按钮文字
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 10px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('点击升级闪电', buttonX + buttonWidth / 2, buttonY + 11);
+        
+        // 存储按钮位置用于点击检测
+        this.upgradeButton = {
+            x: buttonX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+        
+        this.ctx.shadowBlur = 0;
     }
     
     gameLoop(currentTime = 0) {
@@ -333,8 +565,8 @@ class Player {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.width = 40;
-        this.height = 50;
+        this.width = 28; // 40 * 0.7
+        this.height = 35; // 50 * 0.7
         this.speed = 300;
         this.lives = 3;
         this.maxLives = 3;
@@ -345,8 +577,8 @@ class Player {
         this.whipCooldownTime = 1000; // 1秒冷却时间，避免重复创建
     }
     
-    update(deltaTime, keys) {
-        // 移动控制
+    update(deltaTime, keys, game) {
+        // 键盘移动控制
         if (keys['KeyA'] || keys['ArrowLeft']) {
             this.x -= this.speed * deltaTime / 1000;
         }
@@ -360,8 +592,34 @@ class Player {
             this.y += this.speed * deltaTime / 1000;
         }
         
+        // 鼠标移动控制
+        if (game.isMouseDown) {
+            const moveSpeed = this.speed * 2; // 鼠标移动速度更快
+            const dx = game.mouseX - this.x;
+            const dy = game.mouseY - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 5) { // 避免微小移动
+                this.x += (dx / distance) * moveSpeed * deltaTime / 1000;
+                this.y += (dy / distance) * moveSpeed * deltaTime / 1000;
+            }
+        }
+        
+        // 触屏移动控制
+        if (game.isTouchDown) {
+            const moveSpeed = this.speed * 2; // 触屏移动速度更快
+            const dx = game.touchX - this.x;
+            const dy = game.touchY - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 5) { // 避免微小移动
+                this.x += (dx / distance) * moveSpeed * deltaTime / 1000;
+                this.y += (dy / distance) * moveSpeed * deltaTime / 1000;
+            }
+        }
+        
         // 边界检查
-        this.x = Math.max(this.width / 2, Math.min(2560 - this.width / 2, this.x));
+        this.x = Math.max(this.width / 2, Math.min(720 - this.width / 2, this.x));
         this.y = Math.max(this.height / 2, Math.min(1280 - this.height / 2, this.y));
         
         // 闪电鞭冷却
@@ -395,55 +653,112 @@ class Player {
     }
     
     render(ctx) {
-        // 绘制太空战机主体（带发光效果）
+        // 绘制太空飞船主体（带发光效果）
         ctx.shadowColor = '#00aaff';
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 25;
         
-        // 战机主体 - 流线型设计
-        ctx.fillStyle = '#00aaff';
+        // 飞船主体 - 菱形设计
+        ctx.fillStyle = '#0066aa';
         ctx.beginPath();
-        ctx.moveTo(this.x, this.y - this.height / 2);
-        ctx.lineTo(this.x - this.width / 2, this.y - this.height / 4);
-        ctx.lineTo(this.x - this.width / 3, this.y + this.height / 4);
-        ctx.lineTo(this.x - this.width / 4, this.y + this.height / 2);
-        ctx.lineTo(this.x + this.width / 4, this.y + this.height / 2);
-        ctx.lineTo(this.x + this.width / 3, this.y + this.height / 4);
-        ctx.lineTo(this.x + this.width / 2, this.y - this.height / 4);
+        ctx.moveTo(this.x, this.y - this.height / 2); // 顶部
+        ctx.lineTo(this.x + this.width / 2, this.y); // 右侧
+        ctx.lineTo(this.x, this.y + this.height / 2); // 底部
+        ctx.lineTo(this.x - this.width / 2, this.y); // 左侧
         ctx.closePath();
         ctx.fill();
         
-        // 战机驾驶舱
+        // 飞船主体边缘高光
+        ctx.strokeStyle = '#00aaff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // 飞船驾驶舱 - 透明玻璃效果
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = 'rgba(200, 220, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y - this.height / 6, 10, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 驾驶舱边框
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // 飞船机翼 - 扩展设计
         ctx.shadowBlur = 10;
+        ctx.fillStyle = '#004488';
+        
+        // 左机翼
+        ctx.beginPath();
+        ctx.moveTo(this.x - this.width / 2, this.y - 5);
+        ctx.lineTo(this.x - this.width / 2 - 15, this.y - 15);
+        ctx.lineTo(this.x - this.width / 2 - 10, this.y + 5);
+        ctx.lineTo(this.x - this.width / 2, this.y + 5);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 右机翼
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.width / 2, this.y - 5);
+        ctx.lineTo(this.x + this.width / 2 + 15, this.y - 15);
+        ctx.lineTo(this.x + this.width / 2 + 10, this.y + 5);
+        ctx.lineTo(this.x + this.width / 2, this.y + 5);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 机翼细节线条
+        ctx.strokeStyle = '#00aaff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // 飞船引擎 - 双引擎设计
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = '#ff6600';
+        const flameHeight = 25 + Math.sin(Date.now() * 0.015) * 10;
+        const flameWidth = 8 + Math.sin(Date.now() * 0.02) * 3;
+        
+        // 左引擎火焰
+        ctx.beginPath();
+        ctx.ellipse(this.x - 12, this.y + this.height / 2 + flameHeight / 2, flameWidth, flameHeight, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 右引擎火焰
+        ctx.beginPath();
+        ctx.ellipse(this.x + 12, this.y + this.height / 2 + flameHeight / 2, flameWidth, flameHeight, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 引擎核心 - 蓝色能量
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#00ffff';
+        ctx.beginPath();
+        ctx.arc(this.x - 12, this.y + this.height / 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(this.x + 12, this.y + this.height / 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 引擎内层 - 白色核心
+        ctx.shadowBlur = 8;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(this.x, this.y - this.height / 6, 12, 0, Math.PI * 2);
+        ctx.arc(this.x - 12, this.y + this.height / 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(this.x + 12, this.y + this.height / 2, 2, 0, Math.PI * 2);
         ctx.fill();
         
-        // 战机机翼细节
-        ctx.shadowBlur = 5;
-        ctx.fillStyle = '#0088cc';
-        ctx.fillRect(this.x - this.width / 2, this.y - this.height / 6, this.width / 4, 4);
-        ctx.fillRect(this.x + this.width / 4, this.y - this.height / 6, this.width / 4, 4);
-        
-        // 绘制引擎火焰（动态效果）
-        ctx.shadowBlur = 15;
-        ctx.fillStyle = '#ff4400';
-        const flameHeight = 20 + Math.sin(Date.now() * 0.01) * 8;
+        // 飞船武器系统 - 闪电鞭发射器
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#ff00ff';
         ctx.beginPath();
-        ctx.ellipse(this.x - 8, this.y + this.height / 2, 6, flameHeight, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(this.x + 8, this.y + this.height / 2, 6, flameHeight, 0, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y - this.height / 3, 6, 0, Math.PI * 2);
         ctx.fill();
         
-        // 引擎核心
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#ffff00';
+        // 武器系统内层
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(this.x - 8, this.y + this.height / 2, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(this.x + 8, this.y + this.height / 2, 3, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y - this.height / 3, 3, 0, Math.PI * 2);
         ctx.fill();
         
         ctx.shadowBlur = 0;
@@ -455,8 +770,8 @@ class Enemy {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.width = 50;
-        this.height = 60;
+        this.width = 35; // 50 * 0.7
+        this.height = 42; // 60 * 0.7
         this.speed = 100;
         this.health = 500;
         this.maxHealth = 500;
@@ -506,7 +821,7 @@ class Enemy {
         }
         
         // 边界检查
-        this.x = Math.max(this.width / 2, Math.min(2560 - this.width / 2, this.x));
+        this.x = Math.max(this.width / 2, Math.min(720 - this.width / 2, this.x));
     }
     
     takeDamage(damage) {
@@ -554,49 +869,79 @@ class Enemy {
             shakeY = (Math.random() - 0.5) * shakeIntensity;
         }
         
-        // 外星生物主体 - 有机形状（保持原色）
-        ctx.fillStyle = '#ff4444';
+        // 恐怖外星生物主体 - 不规则多边形
+        ctx.fillStyle = '#2a0a0a';
         ctx.beginPath();
-        ctx.ellipse(this.x + shakeX, this.y + shakeY, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+        ctx.moveTo(this.x + shakeX, this.y + shakeY - this.height / 2);
+        ctx.lineTo(this.x + shakeX + this.width / 3, this.y + shakeY - this.height / 4);
+        ctx.lineTo(this.x + shakeX + this.width / 2, this.y + shakeY);
+        ctx.lineTo(this.x + shakeX + this.width / 3, this.y + shakeY + this.height / 4);
+        ctx.lineTo(this.x + shakeX, this.y + shakeY + this.height / 2);
+        ctx.lineTo(this.x + shakeX - this.width / 3, this.y + shakeY + this.height / 4);
+        ctx.lineTo(this.x + shakeX - this.width / 2, this.y + shakeY);
+        ctx.lineTo(this.x + shakeX - this.width / 3, this.y + shakeY - this.height / 4);
+        ctx.closePath();
         ctx.fill();
         
-        // 外星生物触手
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = '#cc3333';
-        for (let i = 0; i < 4; i++) {
-            const angle = (i * Math.PI * 2) / 4 + this.time * 0.01;
-            const tentacleX = this.x + shakeX + Math.cos(angle) * (this.width / 2 + 8);
-            const tentacleY = this.y + shakeY + Math.sin(angle) * (this.height / 2 + 8);
+        // 主体边缘高光
+        ctx.strokeStyle = '#4a1a1a';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // 恐怖触手 - 尖锐的刺状
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = '#1a0505';
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI * 2) / 6 + this.time * 0.02;
+            const tentacleLength = 15 + Math.sin(this.time * 0.1 + i) * 5;
+            const tentacleX = this.x + shakeX + Math.cos(angle) * (this.width / 2 + tentacleLength / 2);
+            const tentacleY = this.y + shakeY + Math.sin(angle) * (this.height / 2 + tentacleLength / 2);
             
             ctx.beginPath();
-            ctx.ellipse(tentacleX, tentacleY, 4, 12, angle, 0, Math.PI * 2);
+            ctx.moveTo(this.x + shakeX + Math.cos(angle) * this.width / 2, 
+                      this.y + shakeY + Math.sin(angle) * this.height / 2);
+            ctx.lineTo(tentacleX, tentacleY);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // 触手尖端
+            ctx.beginPath();
+            ctx.arc(tentacleX, tentacleY, 2, 0, Math.PI * 2);
             ctx.fill();
         }
         
-        // 外星生物眼睛
-        ctx.shadowBlur = 5;
-        ctx.fillStyle = '#ffff00';
+        // 恐怖眼睛 - 红色发光
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ff0000';
         ctx.beginPath();
-        ctx.arc(this.x + shakeX - 8, this.y + shakeY - 8, 6, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX - 10, this.y + shakeY - 10, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(this.x + shakeX + 8, this.y + shakeY - 8, 6, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX + 10, this.y + shakeY - 10, 4, 0, Math.PI * 2);
         ctx.fill();
         
-        // 眼睛瞳孔
+        // 眼睛瞳孔 - 黑色
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#000000';
         ctx.beginPath();
-        ctx.arc(this.x + shakeX - 8, this.y + shakeY - 8, 3, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX - 10, this.y + shakeY - 10, 2, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(this.x + shakeX + 8, this.y + shakeY - 8, 3, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX + 10, this.y + shakeY - 10, 2, 0, Math.PI * 2);
         ctx.fill();
         
-        // 外星生物嘴巴
+        // 恐怖嘴巴 - 锯齿状
         ctx.fillStyle = '#000000';
         ctx.beginPath();
-        ctx.arc(this.x + shakeX, this.y + shakeY + 5, 8, 0, Math.PI);
+        ctx.moveTo(this.x + shakeX - 8, this.y + shakeY + 8);
+        ctx.lineTo(this.x + shakeX - 4, this.y + shakeY + 12);
+        ctx.lineTo(this.x + shakeX, this.y + shakeY + 8);
+        ctx.lineTo(this.x + shakeX + 4, this.y + shakeY + 12);
+        ctx.lineTo(this.x + shakeX + 8, this.y + shakeY + 8);
+        ctx.lineTo(this.x + shakeX + 4, this.y + shakeY + 6);
+        ctx.lineTo(this.x + shakeX, this.y + shakeY + 10);
+        ctx.lineTo(this.x + shakeX - 4, this.y + shakeY + 6);
+        ctx.closePath();
         ctx.fill();
         
         // 绘制生命值条
@@ -633,7 +978,7 @@ class LightningWhip {
         this.startX = startX;
         this.startY = startY;
         this.game = game;
-        this.damage = 2; // 闪电伤害翻倍
+        this.baseDamage = 2; // 基础闪电伤害
         this.isActive = true;
         this.segments = [];
         this.time = 0;
@@ -687,10 +1032,10 @@ class LightningWhip {
     isTargetInCanvas() {
         if (!this.primaryTarget) return false;
         
-        // 检查目标是否在画布范围内（画布大小：2560x1280）
+        // 检查目标是否在画布范围内（画布大小：720x1280）
         const margin = 50; // 给一些边距
         return this.primaryTarget.x >= -margin && 
-               this.primaryTarget.x <= 2560 + margin &&
+               this.primaryTarget.x <= 720 + margin &&
                this.primaryTarget.y >= -margin && 
                this.primaryTarget.y <= 1280 + margin;
     }
@@ -707,7 +1052,7 @@ class LightningWhip {
             const dx = this.startX - enemy.x;
             const dy = this.startY - enemy.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
-            return distance < 800; // 800像素范围内
+            return distance < 400; // 400像素范围内（适应新画布）
         });
         
         if (availableEnemies.length > 0) {
@@ -722,63 +1067,59 @@ class LightningWhip {
     updateSegments() {
         if (!this.primaryTarget) return;
         
-        // 计算到主要目标的基础路径
         const dx = this.primaryTarget.x - this.startX;
         const dy = this.primaryTarget.y - this.startY;
         const distance = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
         
-        // 更新闪电鞭段 - 整条闪电都是弯曲的
+        // 使用单一平滑的贝塞尔曲线，确保没有锐角和钝角
+        // 创建更平滑的控制点，避免分段造成的角度问题
+        
+        // 计算平滑的控制点，确保整条曲线圆滑
+        const controlPoint1X = this.startX + Math.cos(angle + Math.PI / 6) * distance * 0.4;
+        const controlPoint1Y = this.startY + Math.sin(angle + Math.PI / 6) * distance * 0.4;
+        const controlPoint2X = this.primaryTarget.x - Math.cos(angle - Math.PI / 6) * distance * 0.4;
+        const controlPoint2Y = this.primaryTarget.y - Math.sin(angle - Math.PI / 6) * distance * 0.4;
+        
         this.segments.forEach((segment, index) => {
-            const progress = index / (this.segments.length - 1);
+            const t = index / (this.segments.length - 1);
             
-            // 基础位置（直线到主要目标）
-            const baseX = this.startX + dx * progress;
-            const baseY = this.startY + dy * progress;
+            // 使用单一的三次贝塞尔曲线，确保整条曲线圆滑
+            const x = this.cubicBezier(this.startX, controlPoint1X, controlPoint2X, this.primaryTarget.x, t);
+            const y = this.cubicBezier(this.startY, controlPoint1Y, controlPoint2Y, this.primaryTarget.y, t);
             
-            // 创建整条闪电的弯曲效果
-            // 使用S型曲线确保起点和终点都有弯曲
-            const curveIntensity = 30; // 进一步减小弯曲强度
-            const swingFrequency = 0.3; // 摆动频率
+            // 添加动态摆动效果
+            const swingIntensity = 25; // 摆动强度（大幅增加摆动效果）
+            const swingFrequency = 0.8; // 摆动频率（加快一倍）
             const swingPhase = this.time * swingFrequency;
             
             // 垂直于连线的方向
             const perpAngle = angle + Math.PI / 2;
             
-            // 创建S型弯曲 - 确保起点和终点都有弯曲
-            // 使用三次函数创建S型曲线
-            const sCurve = Math.sin(progress * Math.PI) * curveIntensity;
+            // 鞭子摆动效果 - 使用平滑的摆动函数，避免锐角
+            const smoothSwing = Math.sin(swingPhase + t * Math.PI * 1.5) * swingIntensity * (0.3 + 0.7 * t); // 平滑摆动，从起点到终点逐渐增强
             
-            // 主要摆动 - 整条闪电都有摆动
-            const mainSwing = Math.sin(swingPhase + progress * Math.PI * 4) * sCurve;
+            // 添加细微的随机抖动
+            const microJitter = Math.sin(this.time * 0.8 + t * Math.PI * 15 + index * 0.2) * 1 * Math.sin(t * Math.PI);
+            const randomJitter = (Math.random() - 0.5) * 0.5 * Math.sin(t * Math.PI);
             
-            // 添加快速摆动 - 使用更高频率的正弦波
-            const fastSwing = Math.sin(swingPhase * 2.5 + progress * Math.PI * 6) * sCurve * 0.4;
+            // 应用摆动和抖动
+            segment.x = x + Math.cos(perpAngle) * (smoothSwing + microJitter + randomJitter);
+            segment.y = y + Math.sin(perpAngle) * (smoothSwing + microJitter + randomJitter);
             
-            // 添加波浪效果 - 让整条闪电都有波浪
-            const waveEffect = Math.sin(swingPhase * 1.5 + progress * Math.PI * 8) * sCurve * 0.2;
-            
-            // 添加随机摆动 - 让摆动更随机
-            const randomSwing = Math.sin(swingPhase * 3.7 + progress * Math.PI * 12 + index * 0.1) * sCurve * 0.3;
-            
-            // 添加混沌摆动 - 使用更复杂的随机算法
-            const chaosSwing = Math.sin(swingPhase * 5.2 + progress * Math.PI * 15 + this.time * 0.1) * sCurve * 0.2;
-            
-            // 组合所有效果，确保整条闪电都是弯曲的
-            const totalSwing = mainSwing + fastSwing + waveEffect + randomSwing + chaosSwing;
-            
-            // 转换为世界坐标
-            segment.x = baseX + Math.cos(perpAngle) * totalSwing;
-            segment.y = baseY + Math.sin(perpAngle) * totalSwing;
-            
-            // 添加细微的随机抖动，让摆动更随机
-            const microJitter = Math.sin(this.time * 0.8 + progress * Math.PI * 15 + index * 0.2) * 4 * Math.sin(progress * Math.PI);
-            const randomJitter = (Math.random() - 0.5) * 2 * Math.sin(progress * Math.PI);
-            segment.x += Math.cos(perpAngle + Math.PI / 2) * (microJitter + randomJitter);
-            segment.y += Math.sin(perpAngle + Math.PI / 2) * (microJitter + randomJitter);
-            
-            segment.swingOffset = Math.abs(totalSwing);
+            segment.swingOffset = Math.abs(smoothSwing);
         });
+    }
+    
+    cubicBezier(p0, p1, p2, p3, t) {
+        // 三次贝塞尔曲线公式
+        const u = 1 - t;
+        const tt = t * t;
+        const uu = u * u;
+        const uuu = uu * u;
+        const ttt = tt * t;
+        
+        return uuu * p0 + 3 * uu * t * p1 + 3 * u * tt * p2 + ttt * p3;
     }
     
     checkPathCollisions() {
@@ -787,16 +1128,47 @@ class LightningWhip {
             if (!enemy.isDead) {
                 // 检查敌人是否在闪电鞭路径附近
                 if (this.isEnemyOnPath(enemy)) {
-                    // 整条闪电都有伤害，不限制攻击次数
-                    enemy.takeDamage(this.damage);
+                    // 计算伤害：中间部分伤害*3，终点伤害不变
+                    const damage = this.calculateDamageForPosition(enemy);
+                    enemy.takeDamage(damage);
                     
                     if (enemy.isDead) {
                         this.game.score += enemy.scoreValue;
+                        this.game.coins += 1; // 每杀死一个怪物获得1金币
                         this.game.createExplosion(enemy.x, enemy.y);
                     }
                 }
             }
         });
+    }
+    
+    calculateDamageForPosition(enemy) {
+        // 计算敌人相对于闪电鞭起点的位置比例
+        const dx = enemy.x - this.startX;
+        const dy = enemy.y - this.startY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // 获取当前闪电伤害（包含升级加成）
+        const currentDamage = this.game.getLightningDamage();
+        
+        // 计算到终点的距离
+        if (this.primaryTarget) {
+            const targetDx = this.primaryTarget.x - this.startX;
+            const targetDy = this.primaryTarget.y - this.startY;
+            const targetDistance = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
+            
+            // 计算位置比例 (0 = 起点, 1 = 终点)
+            const positionRatio = distance / targetDistance;
+            
+            // 中间部分(0.2-0.8)伤害*3，起点和终点伤害不变
+            if (positionRatio >= 0.2 && positionRatio <= 0.8) {
+                return currentDamage * 3; // 中间部分3倍伤害
+            } else {
+                return currentDamage; // 起点和终点正常伤害
+            }
+        }
+        
+        return currentDamage; // 默认伤害
     }
     
     isEnemyOnPath(enemy) {
@@ -921,6 +1293,55 @@ class LightningWhip {
         ctx.fill();
         
         ctx.shadowBlur = 0;
+    }
+}
+
+// 子弹类
+class Bullet {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 4;
+        this.height = 12;
+        this.speed = 8;
+        this.damage = 10; // 增加子弹伤害到10
+        this.active = true;
+    }
+    
+    update() {
+        this.y -= this.speed;
+        
+        // 如果子弹超出画布顶部，标记为不活跃
+        if (this.y < -this.height) {
+            this.active = false;
+        }
+    }
+    
+    render(ctx) {
+        if (!this.active) return;
+        
+        ctx.save();
+        
+        // 绘制子弹主体
+        ctx.fillStyle = '#00ffff';
+        ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+        
+        // 添加发光效果
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+        
+        ctx.restore();
+    }
+    
+    checkCollision(enemy) {
+        if (!this.active || enemy.isDead) return false;
+        
+        return this.x < enemy.x + enemy.width &&
+               this.x + this.width > enemy.x &&
+               this.y < enemy.y + enemy.height &&
+               this.y + this.height > enemy.y;
     }
 }
 
