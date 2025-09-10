@@ -7,10 +7,20 @@ class RaidenGame {
         this.canvas.height = 1280;
         
         // 游戏状态
-        this.gameState = 'menu'; // menu, playing, paused, gameOver
+        this.gameState = 'menu'; // menu, playing, paused, gameOver, nicknameInput, leaderboard
         this.score = 0;
         this.lives = 3;
         this.level = 1;
+        this.playerName = '';
+        this.nicknameHistory = []; // 昵称历史记录
+        this.leaderboard = [];
+        this.localBestScore = 0;
+        this.networkLeaderboard = [];
+        this.isOnline = false;
+        // 网络排行榜配置
+        this.networkLeaderboardKey = 'raidenGameNetworkLeaderboard';
+        this.demoMode = false; // 设置为false使用真实服务器
+        this.serverUrl = 'http://localhost:3000'; // 服务器地址
         
         // 升级系统
         this.coins = 0; // 金币数量
@@ -35,6 +45,7 @@ class RaidenGame {
         this.isTouchDown = false;
         
         this.setupInput();
+        this.setupUI();
         
         // 游戏循环
         this.lastTime = 0;
@@ -50,11 +61,33 @@ class RaidenGame {
         // 创建星空背景
         this.createStars();
         
+        // 加载排行榜数据
+        this.loadLeaderboard();
+        this.loadLocalBestScore();
+        this.loadNicknameHistory();
+        
+        // 检查网络连接并加载网络排行榜
+        this.checkNetworkConnection();
+        
         // 开始游戏循环
         this.gameLoop();
     }
     
     startGame() {
+        // 如果没有玩家昵称，先显示昵称输入界面
+        if (!this.playerName) {
+            // 如果有历史昵称，自动使用最后一个
+            if (this.nicknameHistory.length > 0) {
+                this.playerName = this.nicknameHistory[this.nicknameHistory.length - 1];
+                // 加载该昵称的最佳成绩
+                this.localBestScore = this.getPlayerBestScore(this.playerName);
+                console.log('自动使用上次昵称:', this.playerName, '最佳成绩:', this.localBestScore);
+            } else {
+                this.showNicknameInput();
+                return;
+            }
+        }
+        
         this.gameState = 'playing';
         this.score = 0;
         this.lives = 3;
@@ -110,6 +143,39 @@ class RaidenGame {
         
         document.addEventListener('keyup', (e) => {
             this.keys[e.code] = false;
+        });
+    }
+    
+    setupUI() {
+        // 昵称输入按钮事件
+        document.getElementById('confirmNicknameBtn').addEventListener('click', () => {
+            this.confirmNickname();
+        });
+        
+        document.getElementById('cancelNicknameBtn').addEventListener('click', () => {
+            this.cancelNickname();
+        });
+        
+        // 排行榜按钮事件
+        document.getElementById('hideLeaderboardBtn').addEventListener('click', () => {
+            this.hideLeaderboard();
+        });
+        
+        document.getElementById('clearLeaderboardBtn').addEventListener('click', () => {
+            this.clearLeaderboard();
+        });
+        
+        document.getElementById('refreshNetworkBtn').addEventListener('click', () => {
+            this.loadNetworkLeaderboard();
+        });
+        
+        // 排行榜标签切换
+        document.getElementById('localTabBtn').addEventListener('click', () => {
+            this.switchLeaderboardTab('local');
+        });
+        
+        document.getElementById('networkTabBtn').addEventListener('click', () => {
+            this.switchLeaderboardTab('network');
         });
     }
     
@@ -245,6 +311,8 @@ class RaidenGame {
                 this.createExplosion(enemy.x, enemy.y);
                 if (this.player.lives <= 0) {
                     this.gameState = 'gameOver';
+                    // 游戏结束时保存分数到排行榜
+                    this.saveScoreToLeaderboard();
                 }
             }
         });
@@ -288,6 +356,17 @@ class RaidenGame {
             // 升级控制
             if (e.code === 'KeyU' && this.gameState === 'playing') {
                 this.upgradeLightning();
+            }
+            
+            // 排行榜控制
+            if (e.code === 'KeyL' && (this.gameState === 'menu' || this.gameState === 'gameOver')) {
+                console.log('按下了L键，显示排行榜');
+                this.showLeaderboard();
+            }
+            
+            // 昵称输入确认
+            if (e.code === 'Enter' && this.gameState === 'nicknameInput') {
+                this.confirmNickname();
             }
         });
         
@@ -410,6 +489,7 @@ class RaidenGame {
         this.ctx.fillText('WASD或方向键移动战机', this.canvas.width / 2, this.canvas.height / 2 + 30);
         this.ctx.fillText('紫色闪电鞭会自动锁定敌人', this.canvas.width / 2, this.canvas.height / 2 + 60);
         this.ctx.fillText('杀死怪物获得金币，按U键升级闪电', this.canvas.width / 2, this.canvas.height / 2 + 90);
+        this.ctx.fillText('按L键查看排行榜', this.canvas.width / 2, this.canvas.height / 2 + 120);
         
         this.ctx.shadowBlur = 0;
     }
@@ -478,6 +558,23 @@ class RaidenGame {
         document.getElementById('score').textContent = this.score;
         document.getElementById('lives').textContent = this.player ? this.player.lives : 3;
         document.getElementById('level').textContent = this.level;
+        document.getElementById('localBest').textContent = this.localBestScore;
+        document.getElementById('currentPlayer').textContent = this.playerName || '未设置';
+        
+        // 更新网络状态显示
+        const networkStatusText = document.getElementById('networkStatusText');
+        if (this.isOnline) {
+            if (this.demoMode) {
+                networkStatusText.textContent = '演示模式';
+                networkStatusText.style.color = '#ffff00';
+            } else {
+                networkStatusText.textContent = '在线';
+                networkStatusText.style.color = '#00ff00';
+            }
+        } else {
+            networkStatusText.textContent = '离线';
+            networkStatusText.style.color = '#ff0000';
+        }
         
         // 渲染升级UI
         this.renderUpgradeUI();
@@ -547,6 +644,400 @@ class RaidenGame {
         };
         
         this.ctx.shadowBlur = 0;
+    }
+    
+    // 排行榜相关方法
+    loadLeaderboard() {
+        const saved = localStorage.getItem('raidenGameLeaderboard');
+        if (saved) {
+            this.leaderboard = JSON.parse(saved);
+        } else {
+            this.leaderboard = [];
+        }
+    }
+    
+    saveLeaderboard() {
+        localStorage.setItem('raidenGameLeaderboard', JSON.stringify(this.leaderboard));
+    }
+    
+    saveScoreToLeaderboard() {
+        if (this.playerName && this.score > 0) {
+            const newEntry = {
+                name: this.playerName,
+                score: this.score,
+                date: new Date().toLocaleDateString()
+            };
+            
+            // 保存到本地排行榜
+            this.leaderboard.push(newEntry);
+            this.leaderboard.sort((a, b) => b.score - a.score);
+            this.leaderboard = this.leaderboard.slice(0, 10);
+            this.saveLeaderboard();
+            
+            // 更新本地最好成绩
+            if (this.score > this.localBestScore) {
+                this.localBestScore = this.score;
+                this.saveLocalBestScore();
+            }
+            
+            // 提交到网络排行榜
+            this.submitScoreToNetwork(this.playerName, this.score);
+        }
+    }
+    
+    showNicknameInput() {
+        this.gameState = 'nicknameInput';
+        document.getElementById('nicknameInput').style.display = 'block';
+        
+        // 渲染昵称历史
+        this.renderNicknameHistory();
+        
+        // 清空输入框
+        document.getElementById('nicknameField').value = '';
+        
+        // 如果有历史昵称，自动填入最后一个
+        if (this.nicknameHistory.length > 0) {
+            const lastNickname = this.nicknameHistory[this.nicknameHistory.length - 1];
+            document.getElementById('nicknameField').value = lastNickname;
+        }
+        
+        document.getElementById('nicknameField').focus();
+    }
+    
+    confirmNickname() {
+        const nickname = document.getElementById('nicknameField').value.trim();
+        if (nickname.length > 0) {
+            this.playerName = nickname;
+            
+            // 保存昵称到历史记录
+            this.addNicknameToHistory(nickname);
+            
+            // 加载该昵称的最佳成绩
+            this.localBestScore = this.getPlayerBestScore(nickname);
+            
+            document.getElementById('nicknameInput').style.display = 'none';
+            this.startGame();
+        } else {
+            alert('请输入有效的昵称！');
+        }
+    }
+    
+    cancelNickname() {
+        document.getElementById('nicknameInput').style.display = 'none';
+        this.gameState = 'menu';
+    }
+    
+    showLeaderboard() {
+        console.log('显示排行榜，当前状态:', this.gameState);
+        this.gameState = 'leaderboard';
+        const leaderboardElement = document.getElementById('leaderboard');
+        if (leaderboardElement) {
+            leaderboardElement.style.display = 'block';
+            this.currentLeaderboardTab = 'local';
+            this.switchLeaderboardTab('local');
+        } else {
+            console.error('找不到排行榜元素');
+        }
+    }
+    
+    hideLeaderboard() {
+        document.getElementById('leaderboard').style.display = 'none';
+        this.gameState = 'menu';
+    }
+    
+    renderLeaderboard() {
+        const listElement = document.getElementById('leaderboardList');
+        listElement.innerHTML = '';
+        
+        if (this.leaderboard.length === 0) {
+            listElement.innerHTML = '<li>暂无记录</li>';
+            return;
+        }
+        
+        this.leaderboard.forEach((entry, index) => {
+            const li = document.createElement('li');
+            const rank = index + 1;
+            const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+            li.innerHTML = `${medal} ${entry.name} - ${entry.score}分 (${entry.date})`;
+            listElement.appendChild(li);
+        });
+    }
+    
+    clearLeaderboard() {
+        if (confirm('确定要清空本地排行榜吗？')) {
+            this.leaderboard = [];
+            this.saveLeaderboard();
+            this.renderLeaderboard();
+        }
+    }
+    
+    // 本地最好成绩相关方法
+    loadLocalBestScore() {
+        const saved = localStorage.getItem('raidenGameLocalBest');
+        if (saved) {
+            this.localBestScore = parseInt(saved) || 0;
+        }
+    }
+    
+    saveLocalBestScore() {
+        localStorage.setItem('raidenGameLocalBest', this.localBestScore.toString());
+        
+        // 同时保存按昵称分别的最佳成绩
+        if (this.playerName) {
+            const playerBestKey = `raidenGameBest_${this.playerName}`;
+            localStorage.setItem(playerBestKey, this.localBestScore.toString());
+        }
+    }
+    
+    // 获取指定昵称的最佳成绩
+    getPlayerBestScore(nickname) {
+        const playerBestKey = `raidenGameBest_${nickname}`;
+        const saved = localStorage.getItem(playerBestKey);
+        return saved ? parseInt(saved) : 0;
+    }
+    
+    // 网络连接相关方法
+    async checkNetworkConnection() {
+        if (this.demoMode) {
+            // 演示模式：模拟网络连接
+            this.isOnline = true;
+            console.log('✅ 演示模式：模拟网络连接正常');
+            this.loadNetworkLeaderboard();
+        } else {
+            // 真实网络连接
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                
+                const response = await fetch(`${this.serverUrl}/api/status`, {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.isOnline = true;
+                    console.log('✅ 网络连接正常，服务器状态:', data);
+                    this.loadNetworkLeaderboard();
+                } else {
+                    this.isOnline = false;
+                    console.log('❌ 网络连接失败，状态码:', response.status);
+                }
+            } catch (error) {
+                this.isOnline = false;
+                if (error.name === 'AbortError') {
+                    console.log('❌ 连接超时');
+                } else {
+                    console.log('❌ 无法连接到服务器:', error.message);
+                }
+            }
+        }
+    }
+    
+    async loadNetworkLeaderboard() {
+        if (!this.isOnline) return;
+        
+        if (this.demoMode) {
+            // 演示模式：从localStorage加载模拟的网络排行榜
+            const saved = localStorage.getItem(this.networkLeaderboardKey);
+            if (saved) {
+                this.networkLeaderboard = JSON.parse(saved);
+            } else {
+                // 创建一些演示数据
+                this.networkLeaderboard = [
+                    { name: '游戏大师', score: 50000, date: '2024-01-15T10:30:00.000Z' },
+                    { name: '闪电王', score: 45000, date: '2024-01-14T15:20:00.000Z' },
+                    { name: '雷电战士', score: 40000, date: '2024-01-13T09:15:00.000Z' },
+                    { name: '飞行高手', score: 35000, date: '2024-01-12T14:45:00.000Z' },
+                    { name: '射击专家', score: 30000, date: '2024-01-11T11:30:00.000Z' }
+                ];
+                this.saveNetworkLeaderboard();
+            }
+            console.log('📊 演示模式：网络排行榜加载成功');
+        } else {
+            // 真实网络连接
+            try {
+                const response = await fetch(`${this.serverUrl}/api/leaderboard?limit=50`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.networkLeaderboard = data.data;
+                    console.log('📊 网络排行榜加载成功，共', data.data.length, '条记录');
+                } else {
+                    console.error('服务器返回错误:', data.error);
+                }
+            } catch (error) {
+                console.error('加载网络排行榜失败:', error);
+            }
+        }
+    }
+    
+    async submitScoreToNetwork(name, score) {
+        if (!this.isOnline) {
+            console.log('离线模式，无法提交到网络排行榜');
+            return;
+        }
+        
+        if (this.demoMode) {
+            // 演示模式：模拟提交到网络排行榜
+            const newEntry = {
+                name: name,
+                score: score,
+                date: new Date().toISOString()
+            };
+            
+            this.networkLeaderboard.push(newEntry);
+            this.networkLeaderboard.sort((a, b) => b.score - a.score);
+            this.networkLeaderboard = this.networkLeaderboard.slice(0, 50); // 只保留前50名
+            
+            this.saveNetworkLeaderboard();
+            
+            const rank = this.networkLeaderboard.findIndex(entry => entry.name === name && entry.score === score) + 1;
+            console.log(`🎉 演示模式：分数提交成功！排名: ${rank}`);
+        } else {
+            // 真实网络连接
+            try {
+                const response = await fetch(`${this.serverUrl}/api/submit-score`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        score: score
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log(`🎉 分数提交成功！排名: ${data.rank}`);
+                    // 重新加载网络排行榜
+                    await this.loadNetworkLeaderboard();
+                } else {
+                    console.error('提交分数失败:', data.error);
+                    alert(`提交分数失败: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('提交分数到网络失败:', error);
+                alert('网络连接失败，无法提交分数');
+            }
+        }
+    }
+    
+    saveNetworkLeaderboard() {
+        localStorage.setItem(this.networkLeaderboardKey, JSON.stringify(this.networkLeaderboard));
+    }
+    
+    // 昵称历史相关方法
+    loadNicknameHistory() {
+        const saved = localStorage.getItem('raidenGameNicknameHistory');
+        if (saved) {
+            this.nicknameHistory = JSON.parse(saved);
+        } else {
+            this.nicknameHistory = [];
+        }
+    }
+    
+    saveNicknameHistory() {
+        localStorage.setItem('raidenGameNicknameHistory', JSON.stringify(this.nicknameHistory));
+    }
+    
+    addNicknameToHistory(nickname) {
+        // 如果昵称已存在，先移除
+        const index = this.nicknameHistory.indexOf(nickname);
+        if (index > -1) {
+            this.nicknameHistory.splice(index, 1);
+        }
+        
+        // 添加到历史记录末尾
+        this.nicknameHistory.push(nickname);
+        
+        // 只保留最近10个昵称
+        if (this.nicknameHistory.length > 10) {
+            this.nicknameHistory = this.nicknameHistory.slice(-10);
+        }
+        
+        this.saveNicknameHistory();
+    }
+    
+    renderNicknameHistory() {
+        const historyList = document.getElementById('nicknameHistoryList');
+        historyList.innerHTML = '';
+        
+        if (this.nicknameHistory.length === 0) {
+            historyList.innerHTML = '<p style="color: #666; font-size: 12px;">暂无历史昵称</p>';
+            return;
+        }
+        
+        // 倒序显示，最新的在前面
+        const reversedHistory = [...this.nicknameHistory].reverse();
+        
+        reversedHistory.forEach(nickname => {
+            const item = document.createElement('div');
+            item.className = 'nickname-history-item';
+            item.textContent = nickname;
+            item.addEventListener('click', () => {
+                this.selectNicknameFromHistory(nickname);
+            });
+            historyList.appendChild(item);
+        });
+    }
+    
+    selectNicknameFromHistory(nickname) {
+        // 更新输入框
+        document.getElementById('nicknameField').value = nickname;
+        
+        // 更新选中状态
+        const items = document.querySelectorAll('.nickname-history-item');
+        items.forEach(item => {
+            item.classList.remove('selected');
+            if (item.textContent === nickname) {
+                item.classList.add('selected');
+            }
+        });
+    }
+    
+    // 排行榜切换方法
+    switchLeaderboardTab(tab) {
+        this.currentLeaderboardTab = tab;
+        
+        // 更新标签按钮状态
+        document.getElementById('localTabBtn').classList.toggle('active', tab === 'local');
+        document.getElementById('networkTabBtn').classList.toggle('active', tab === 'network');
+        
+        // 渲染对应的排行榜
+        if (tab === 'local') {
+            this.renderLeaderboard();
+        } else {
+            this.renderNetworkLeaderboard();
+        }
+    }
+    
+    renderNetworkLeaderboard() {
+        const listElement = document.getElementById('leaderboardList');
+        listElement.innerHTML = '';
+        
+        if (!this.isOnline) {
+            listElement.innerHTML = '<li>网络连接不可用</li>';
+            return;
+        }
+        
+        if (this.networkLeaderboard.length === 0) {
+            listElement.innerHTML = '<li>暂无网络记录</li>';
+            return;
+        }
+        
+        this.networkLeaderboard.forEach((entry, index) => {
+            const li = document.createElement('li');
+            const rank = index + 1;
+            const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+            const date = new Date(entry.date).toLocaleDateString();
+            li.innerHTML = `${medal} ${entry.name} - ${entry.score}分 (${date})`;
+            listElement.appendChild(li);
+        });
     }
     
     gameLoop(currentTime = 0) {
