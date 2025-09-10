@@ -7,10 +7,13 @@ class RaidenGame {
         this.canvas.height = 1280;
         
         // 游戏状态
-        this.gameState = 'menu'; // menu, playing, paused, gameOver, nickname
+        this.gameState = 'menu'; // menu, playing, paused, gameOver, nickname, upgradeReminder
         this.score = 0;
         this.lives = 3;
         this.level = 1;
+        
+        // 升级提示
+        this.showUpgradeReminder = true;
         
         // 玩家信息
         this.playerName = this.loadPlayerName();
@@ -159,6 +162,12 @@ class RaidenGame {
                 this.lightningWhips.push(whip);
             }
         };
+        
+        // 如果是第一次开始游戏，显示升级提示
+        if (this.showUpgradeReminder) {
+            this.gameState = 'upgradeReminder';
+            this.showUpgradeReminder = false; // 只显示一次
+        }
     }
     
     createStars() {
@@ -371,6 +380,8 @@ class RaidenGame {
                     this.startGame();
                 } else if (this.gameState === 'nickname') {
                     this.handleNicknameSubmit();
+                } else if (this.gameState === 'upgradeReminder') {
+                    this.gameState = 'playing'; // 关闭升级提示，开始游戏
                 }
             }
             
@@ -481,6 +492,9 @@ class RaidenGame {
             this.renderNicknameInput();
         } else if (this.gameState === 'playing') {
             this.renderGame();
+        } else if (this.gameState === 'upgradeReminder') {
+            this.renderGame();
+            this.renderUpgradeReminder();
         } else if (this.gameState === 'gameOver') {
             this.renderGame();
             this.renderGameOver();
@@ -609,6 +623,48 @@ class RaidenGame {
         this.ctx.shadowBlur = 5;
         this.ctx.fillText('输入昵称后按回车键确认', this.canvas.width / 2, this.canvas.height / 2 + 80);
         this.ctx.fillText('按ESC键返回主菜单', this.canvas.width / 2, this.canvas.height / 2 + 110);
+        
+        this.ctx.shadowBlur = 0;
+    }
+    
+    renderUpgradeReminder() {
+        // 绘制半透明背景
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // 绘制提示框背景
+        const boxWidth = 500;
+        const boxHeight = 200;
+        const boxX = (this.canvas.width - boxWidth) / 2;
+        const boxY = (this.canvas.height - boxHeight) / 2;
+        
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+        this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        
+        // 绘制边框
+        this.ctx.strokeStyle = '#00ffff';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        
+        // 绘制标题
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.font = 'bold 28px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.shadowColor = '#ffff00';
+        this.ctx.shadowBlur = 15;
+        this.ctx.fillText('⚡ 重要提示 ⚡', this.canvas.width / 2, boxY + 50);
+        
+        // 绘制提示内容
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 24px Arial';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillText('不要忘记点击U键升级闪电哦！', this.canvas.width / 2, boxY + 100);
+        
+        // 绘制说明
+        this.ctx.fillStyle = '#00ff00';
+        this.ctx.font = 'bold 18px Arial';
+        this.ctx.shadowBlur = 5;
+        this.ctx.fillText('按空格键或回车键继续游戏', this.canvas.width / 2, boxY + 140);
         
         this.ctx.shadowBlur = 0;
     }
