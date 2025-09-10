@@ -33,10 +33,11 @@
             top: 20px;
             left: 20px;
             color: #00ffff;
-            font-size: 24px;
+            font-size: 20px;
             font-weight: bold;
             text-shadow: 0 0 10px #00ffff;
             z-index: 100;
+            line-height: 1.2;
         }
         
         #instructions {
@@ -54,15 +55,23 @@
         <canvas id="gameCanvas" width="2560" height="1280"></canvas>
         <div id="ui">
             <div>分数: <span id="score">0</span></div>
-            <div>生命: <span id="lives">3</span></div>
+            <div>生命: <span id="lives">❤️❤️❤️</span></div>
             <div>等级: <span id="level">1</span></div>
+            <div id="playerInfo"></div>
         </div>
         <div id="instructions">
             使用WASD或方向键移动战机<br>
             紫色闪电鞭会自动锁定敌人
+        </div>
+        
+        <!-- 昵称输入框 -->
+        <div id="nicknameContainer" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000;">
+            <input type="text" id="nicknameInput" placeholder="请输入昵称" maxlength="10" 
+                   style="padding: 10px; font-size: 18px; border: 2px solid #00ffff; background: rgba(0,0,0,0.8); color: #00ffff; text-align: center; border-radius: 5px;">
         </div>
     </div>
     
     <script src="game.js"></script>
 </body>
 </html>
+
