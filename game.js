@@ -7,10 +7,14 @@ class RaidenGame {
         this.canvas.height = 1280;
         
         // 游戏状态
-        this.gameState = 'menu'; // menu, playing, paused, gameOver
+        this.gameState = 'menu'; // menu, playing, paused, gameOver, nickname
         this.score = 0;
         this.lives = 3;
         this.level = 1;
+        
+        // 玩家信息
+        this.playerName = this.loadPlayerName();
+        this.leaderboard = this.loadLeaderboard();
         
         // 升级系统
         this.coins = 0; // 金币数量
@@ -52,6 +56,81 @@ class RaidenGame {
         
         // 开始游戏循环
         this.gameLoop();
+    }
+    
+    // 本地存储功能
+    loadPlayerName() {
+        return localStorage.getItem('raidenPlayerName') || '';
+    }
+    
+    savePlayerName(name) {
+        localStorage.setItem('raidenPlayerName', name);
+        this.playerName = name;
+    }
+    
+    loadLeaderboard() {
+        const saved = localStorage.getItem('raidenLeaderboard');
+        return saved ? JSON.parse(saved) : [];
+    }
+    
+    saveLeaderboard() {
+        localStorage.setItem('raidenLeaderboard', JSON.stringify(this.leaderboard));
+    }
+    
+    addToLeaderboard(score) {
+        if (!this.playerName) return;
+        
+        const entry = {
+            name: this.playerName,
+            score: score,
+            date: new Date().toLocaleDateString()
+        };
+        
+        this.leaderboard.push(entry);
+        this.leaderboard.sort((a, b) => b.score - a.score);
+        
+        // 只保留前10名
+        if (this.leaderboard.length > 10) {
+            this.leaderboard = this.leaderboard.slice(0, 10);
+        }
+        
+        this.saveLeaderboard();
+    }
+    
+    getPlayerBestScore() {
+        if (!this.playerName) return 0;
+        
+        const playerEntries = this.leaderboard.filter(entry => entry.name === this.playerName);
+        if (playerEntries.length === 0) return 0;
+        
+        return Math.max(...playerEntries.map(entry => entry.score));
+    }
+    
+    handleNicknameSubmit() {
+        const input = document.getElementById('nicknameInput');
+        const name = input.value.trim();
+        if (name) {
+            this.savePlayerName(name);
+            this.gameState = 'menu';
+            this.hideNicknameInput();
+        }
+    }
+    
+    showNicknameInput() {
+        const container = document.getElementById('nicknameContainer');
+        const input = document.getElementById('nicknameInput');
+        if (container && input) {
+            container.style.display = 'block';
+            input.value = '';
+            input.focus();
+        }
+    }
+    
+    hideNicknameInput() {
+        const container = document.getElementById('nicknameContainer');
+        if (container) {
+            container.style.display = 'none';
+        }
     }
     
     startGame() {
@@ -204,7 +283,7 @@ class RaidenGame {
     }
     
     spawnBullet() {
-        const bullet = new Bullet(this.player.x, this.player.y - this.player.height / 2);
+        const bullet = new Bullet(this.player.x, this.player.y - this.player.height / 2, this);
         this.bullets.push(bullet);
     }
     
@@ -245,6 +324,7 @@ class RaidenGame {
                 this.createExplosion(enemy.x, enemy.y);
                 if (this.player.lives <= 0) {
                     this.gameState = 'gameOver';
+                    this.addToLeaderboard(this.score);
                 }
             }
         });
@@ -268,7 +348,7 @@ class RaidenGame {
     getLightningDamage() {
         // 计算当前闪电伤害（基础伤害 * 等级加成）
         const baseDamage = 2;
-        const levelMultiplier = 1 + (this.lightningLevel - 1) * 0.1; // 每级增加10%
+        const levelMultiplier = 1 + (this.lightningLevel - 1) * 0.3; // 每级增加30%，让升级效果更明显
         return Math.floor(baseDamage * levelMultiplier);
     }
     
@@ -280,8 +360,27 @@ class RaidenGame {
             // 游戏状态控制
             if (e.code === 'Space' || e.code === 'Enter') {
                 e.preventDefault();
-                if (this.gameState === 'menu' || this.gameState === 'gameOver') {
+                if (this.gameState === 'menu') {
+                    if (this.playerName) {
+                        this.startGame();
+                    } else {
+                        this.gameState = 'nickname';
+                        this.showNicknameInput();
+                    }
+                } else if (this.gameState === 'gameOver') {
                     this.startGame();
+                } else if (this.gameState === 'nickname') {
+                    this.handleNicknameSubmit();
+                }
+            }
+            
+            // ESC键返回主菜单
+            if (e.code === 'Escape') {
+                if (this.gameState === 'playing' || this.gameState === 'gameOver') {
+                    this.gameState = 'menu';
+                } else if (this.gameState === 'nickname') {
+                    this.gameState = 'menu';
+                    this.hideNicknameInput();
                 }
             }
             
@@ -378,6 +477,8 @@ class RaidenGame {
         // 根据游戏状态渲染不同内容
         if (this.gameState === 'menu') {
             this.renderMenu();
+        } else if (this.gameState === 'nickname') {
+            this.renderNicknameInput();
         } else if (this.gameState === 'playing') {
             this.renderGame();
         } else if (this.gameState === 'gameOver') {
@@ -396,20 +497,118 @@ class RaidenGame {
         this.ctx.textAlign = 'center';
         this.ctx.shadowColor = '#00ffff';
         this.ctx.shadowBlur = 20;
-        this.ctx.fillText('雷电2风格射击游戏', this.canvas.width / 2, this.canvas.height / 2 - 100);
+        this.ctx.fillText('雷电2风格射击游戏', this.canvas.width / 2, 150);
+        
+        // 绘制玩家昵称
+        if (this.playerName) {
+            this.ctx.fillStyle = '#ffff00';
+            this.ctx.font = 'bold 24px Arial';
+            this.ctx.shadowBlur = 10;
+            this.ctx.fillText(`玩家: ${this.playerName}`, this.canvas.width / 2, 200);
+        }
+        
+        // 绘制排行榜
+        this.renderLeaderboard();
         
         // 绘制说明
         this.ctx.fillStyle = '#ffff00';
         this.ctx.font = 'bold 20px Arial';
         this.ctx.shadowBlur = 10;
-        this.ctx.fillText('按空格键或回车键开始游戏', this.canvas.width / 2, this.canvas.height / 2 - 20);
+        this.ctx.fillText('按空格键或回车键开始游戏', this.canvas.width / 2, this.canvas.height - 200);
         
         this.ctx.fillStyle = '#ffffff';
         this.ctx.font = 'bold 16px Arial';
         this.ctx.shadowBlur = 5;
-        this.ctx.fillText('WASD或方向键移动战机', this.canvas.width / 2, this.canvas.height / 2 + 30);
-        this.ctx.fillText('紫色闪电鞭会自动锁定敌人', this.canvas.width / 2, this.canvas.height / 2 + 60);
-        this.ctx.fillText('杀死怪物获得金币，按U键升级闪电', this.canvas.width / 2, this.canvas.height / 2 + 90);
+        this.ctx.fillText('WASD或方向键移动战机', this.canvas.width / 2, this.canvas.height - 170);
+        this.ctx.fillText('紫色闪电鞭会自动锁定敌人', this.canvas.width / 2, this.canvas.height - 140);
+        this.ctx.fillText('杀死怪物获得金币，按U键升级闪电', this.canvas.width / 2, this.canvas.height - 110);
+        this.ctx.fillText('游戏中按ESC键返回主菜单', this.canvas.width / 2, this.canvas.height - 80);
+        
+        this.ctx.shadowBlur = 0;
+    }
+    
+    renderLeaderboard() {
+        const startY = 250;
+        const lineHeight = 25;
+        
+        // 排行榜标题
+        this.ctx.fillStyle = '#ff00ff';
+        this.ctx.font = 'bold 20px Arial';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillText('排行榜', this.canvas.width / 2, startY);
+        
+        // 绘制排行榜背景
+        const boardWidth = 400;
+        const boardHeight = Math.min(this.leaderboard.length * lineHeight + 20, 200);
+        const boardX = (this.canvas.width - boardWidth) / 2;
+        const boardY = startY + 30;
+        
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(boardX, boardY, boardWidth, boardHeight);
+        this.ctx.strokeStyle = '#00ffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(boardX, boardY, boardWidth, boardHeight);
+        
+        // 绘制排行榜内容
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 14px Arial';
+        this.ctx.textAlign = 'left';
+        this.ctx.shadowBlur = 0;
+        
+        if (this.leaderboard.length === 0) {
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('暂无记录', this.canvas.width / 2, boardY + 30);
+        } else {
+            this.leaderboard.slice(0, 8).forEach((entry, index) => {
+                const y = boardY + 20 + index * lineHeight;
+                const rank = index + 1;
+                const name = entry.name.length > 8 ? entry.name.substring(0, 8) + '...' : entry.name;
+                
+                // 排名颜色
+                if (rank === 1) this.ctx.fillStyle = '#ffd700';
+                else if (rank === 2) this.ctx.fillStyle = '#c0c0c0';
+                else if (rank === 3) this.ctx.fillStyle = '#cd7f32';
+                else this.ctx.fillStyle = '#ffffff';
+                
+                this.ctx.fillText(`${rank}. ${name}`, boardX + 10, y);
+                this.ctx.fillText(entry.score.toString(), boardX + boardWidth - 80, y);
+            });
+        }
+        
+        this.ctx.textAlign = 'center';
+    }
+    
+    renderNicknameInput() {
+        // 绘制半透明背景
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // 绘制标题
+        this.ctx.fillStyle = '#00ffff';
+        this.ctx.font = 'bold 32px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.shadowColor = '#00ffff';
+        this.ctx.shadowBlur = 20;
+        this.ctx.fillText('请输入游戏昵称', this.canvas.width / 2, this.canvas.height / 2 - 50);
+        
+        // 绘制输入框背景
+        const inputWidth = 300;
+        const inputHeight = 40;
+        const inputX = (this.canvas.width - inputWidth) / 2;
+        const inputY = this.canvas.height / 2;
+        
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        this.ctx.fillRect(inputX, inputY, inputWidth, inputHeight);
+        this.ctx.strokeStyle = '#00ffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(inputX, inputY, inputWidth, inputHeight);
+        
+        // 绘制说明
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.font = 'bold 16px Arial';
+        this.ctx.shadowBlur = 5;
+        this.ctx.fillText('输入昵称后按回车键确认', this.canvas.width / 2, this.canvas.height / 2 + 80);
+        this.ctx.fillText('按ESC键返回主菜单', this.canvas.width / 2, this.canvas.height / 2 + 110);
         
         this.ctx.shadowBlur = 0;
     }
@@ -450,7 +649,15 @@ class RaidenGame {
         this.ctx.textAlign = 'center';
         this.ctx.shadowColor = '#ff0000';
         this.ctx.shadowBlur = 20;
-        this.ctx.fillText('游戏结束', this.canvas.width / 2, this.canvas.height / 2 - 30);
+        this.ctx.fillText('游戏结束', this.canvas.width / 2, this.canvas.height / 2 - 60);
+        
+        // 绘制玩家昵称
+        if (this.playerName) {
+            this.ctx.fillStyle = '#ffff00';
+            this.ctx.font = 'bold 24px Arial';
+            this.ctx.shadowBlur = 10;
+            this.ctx.fillText(`玩家: ${this.playerName}`, this.canvas.width / 2, this.canvas.height / 2 - 20);
+        }
         
         this.ctx.fillStyle = '#ffff00';
         this.ctx.font = 'bold 20px Arial';
@@ -461,6 +668,7 @@ class RaidenGame {
         this.ctx.font = 'bold 16px Arial';
         this.ctx.shadowBlur = 5;
         this.ctx.fillText('按空格键或回车键重新开始', this.canvas.width / 2, this.canvas.height / 2 + 60);
+        this.ctx.fillText('按ESC键返回主菜单', this.canvas.width / 2, this.canvas.height / 2 + 90);
         
         this.ctx.shadowBlur = 0;
     }
@@ -476,19 +684,33 @@ class RaidenGame {
     
     updateUI() {
         document.getElementById('score').textContent = this.score;
-        document.getElementById('lives').textContent = this.player ? this.player.lives : 3;
+        
+        // 显示桃心形状的生命值
+        const lives = this.player ? this.player.lives : 3;
+        const hearts = '❤️'.repeat(lives) + '🤍'.repeat(3 - lives);
+        document.getElementById('lives').textContent = hearts;
+        
         document.getElementById('level').textContent = this.level;
+        
+        // 更新用户信息显示
+        if (this.playerName) {
+            const bestScore = this.getPlayerBestScore();
+            document.getElementById('playerInfo').textContent = `${this.playerName} | 最好: ${bestScore}`;
+        } else {
+            document.getElementById('playerInfo').textContent = '';
+        }
         
         // 渲染升级UI
         this.renderUpgradeUI();
     }
+    
     
     renderUpgradeUI() {
         if (this.gameState !== 'playing') return;
         
         // 计算右上角位置（竖屏模式）
         const uiWidth = 250; // 进一步缩小UI宽度适应竖屏
-        const uiHeight = 100; // 保持UI高度
+        const uiHeight = 120; // 增加UI高度以容纳U键提示
         const uiX = this.canvas.width - uiWidth - 10; // 减少边距
         const uiY = 20;
         
@@ -509,17 +731,23 @@ class RaidenGame {
         this.ctx.shadowBlur = 5;
         this.ctx.fillText(`金币: ${this.coins}`, uiX + 8, uiY + 25);
         
-        // 绘制闪电等级信息
+        // 绘制闪电等级和伤害信息
         this.ctx.fillStyle = '#ff00ff';
-        this.ctx.fillText(`闪电等级: ${this.lightningLevel}`, uiX + 8, uiY + 50);
+        const lightningDamage = this.getLightningDamage();
+        this.ctx.fillText(`闪电等级: ${this.lightningLevel} (伤害: ${lightningDamage})`, uiX + 8, uiY + 50);
         
         // 绘制升级费用和提示
         this.ctx.fillStyle = this.coins >= this.lightningUpgradeCost ? '#00ff00' : '#ff0000';
         this.ctx.fillText(`升级费用: ${this.lightningUpgradeCost}`, uiX + 8, uiY + 75);
         
+        // 绘制U键升级提示
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.font = 'bold 16px Arial'; // 从12px增加到16px
+        this.ctx.fillText('按U键升级闪电', uiX + 8, uiY + 95);
+        
         // 绘制升级按钮
         const buttonX = uiX + 8;
-        const buttonY = uiY + 80;
+        const buttonY = uiY + 100;
         const buttonWidth = uiWidth - 16;
         const buttonHeight = 15;
         
@@ -565,8 +793,8 @@ class Player {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.width = 28; // 40 * 0.7
-        this.height = 35; // 50 * 0.7
+        this.width = 20; // 从28缩小到20
+        this.height = 25; // 从35缩小到25
         this.speed = 300;
         this.lives = 3;
         this.maxLives = 3;
@@ -649,7 +877,10 @@ class Player {
         const dx = this.x - other.x;
         const dy = this.y - other.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        return distance < (this.width / 2 + other.width / 2);
+        // 减小碰撞检测范围，使用更小的碰撞半径
+        const playerCollisionRadius = this.width * 0.6; // 从1.0减小到0.6
+        const otherCollisionRadius = other.width * 0.8; // 敌人碰撞半径也稍微减小
+        return distance < (playerCollisionRadius + otherCollisionRadius);
     }
     
     render(ctx) {
@@ -869,31 +1100,30 @@ class Enemy {
             shakeY = (Math.random() - 0.5) * shakeIntensity;
         }
         
-        // 恐怖外星生物主体 - 不规则多边形
-        ctx.fillStyle = '#2a0a0a';
+        // 优化后的外星生物主体 - 更圆润的设计
+        ctx.fillStyle = '#1a1a3a';
         ctx.beginPath();
-        ctx.moveTo(this.x + shakeX, this.y + shakeY - this.height / 2);
-        ctx.lineTo(this.x + shakeX + this.width / 3, this.y + shakeY - this.height / 4);
-        ctx.lineTo(this.x + shakeX + this.width / 2, this.y + shakeY);
-        ctx.lineTo(this.x + shakeX + this.width / 3, this.y + shakeY + this.height / 4);
-        ctx.lineTo(this.x + shakeX, this.y + shakeY + this.height / 2);
-        ctx.lineTo(this.x + shakeX - this.width / 3, this.y + shakeY + this.height / 4);
-        ctx.lineTo(this.x + shakeX - this.width / 2, this.y + shakeY);
-        ctx.lineTo(this.x + shakeX - this.width / 3, this.y + shakeY - this.height / 4);
-        ctx.closePath();
+        // 使用椭圆形状，更现代化
+        ctx.ellipse(this.x + shakeX, this.y + shakeY, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
         ctx.fill();
         
         // 主体边缘高光
-        ctx.strokeStyle = '#4a1a1a';
+        ctx.strokeStyle = '#3a3a5a';
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // 恐怖触手 - 尖锐的刺状
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#1a0505';
-        for (let i = 0; i < 6; i++) {
-            const angle = (i * Math.PI * 2) / 6 + this.time * 0.02;
-            const tentacleLength = 15 + Math.sin(this.time * 0.1 + i) * 5;
+        // 添加内部装饰
+        ctx.fillStyle = '#2a2a4a';
+        ctx.beginPath();
+        ctx.ellipse(this.x + shakeX, this.y + shakeY, this.width / 3, this.height / 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 优化后的触手 - 更优雅的设计
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#4a4a6a';
+        for (let i = 0; i < 4; i++) { // 减少触手数量，更简洁
+            const angle = (i * Math.PI * 2) / 4 + this.time * 0.01;
+            const tentacleLength = 12 + Math.sin(this.time * 0.05 + i) * 3;
             const tentacleX = this.x + shakeX + Math.cos(angle) * (this.width / 2 + tentacleLength / 2);
             const tentacleY = this.y + shakeY + Math.sin(angle) * (this.height / 2 + tentacleLength / 2);
             
@@ -901,47 +1131,39 @@ class Enemy {
             ctx.moveTo(this.x + shakeX + Math.cos(angle) * this.width / 2, 
                       this.y + shakeY + Math.sin(angle) * this.height / 2);
             ctx.lineTo(tentacleX, tentacleY);
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 2;
             ctx.stroke();
             
-            // 触手尖端
+            // 触手尖端 - 更圆润
             ctx.beginPath();
-            ctx.arc(tentacleX, tentacleY, 2, 0, Math.PI * 2);
+            ctx.arc(tentacleX, tentacleY, 3, 0, Math.PI * 2);
             ctx.fill();
         }
         
-        // 恐怖眼睛 - 红色发光
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = '#ff0000';
+        // 优化后的眼睛 - 更现代的设计
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = '#00aaff';
         ctx.beginPath();
-        ctx.arc(this.x + shakeX - 10, this.y + shakeY - 10, 4, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX - 8, this.y + shakeY - 8, 5, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(this.x + shakeX + 10, this.y + shakeY - 10, 4, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX + 8, this.y + shakeY - 8, 5, 0, Math.PI * 2);
         ctx.fill();
         
-        // 眼睛瞳孔 - 黑色
+        // 眼睛瞳孔 - 白色
         ctx.shadowBlur = 0;
-        ctx.fillStyle = '#000000';
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(this.x + shakeX - 10, this.y + shakeY - 10, 2, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX - 8, this.y + shakeY - 8, 2, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(this.x + shakeX + 10, this.y + shakeY - 10, 2, 0, Math.PI * 2);
+        ctx.arc(this.x + shakeX + 8, this.y + shakeY - 8, 2, 0, Math.PI * 2);
         ctx.fill();
         
-        // 恐怖嘴巴 - 锯齿状
-        ctx.fillStyle = '#000000';
+        // 优化后的嘴巴 - 更简洁的设计
+        ctx.fillStyle = '#5a5a7a';
         ctx.beginPath();
-        ctx.moveTo(this.x + shakeX - 8, this.y + shakeY + 8);
-        ctx.lineTo(this.x + shakeX - 4, this.y + shakeY + 12);
-        ctx.lineTo(this.x + shakeX, this.y + shakeY + 8);
-        ctx.lineTo(this.x + shakeX + 4, this.y + shakeY + 12);
-        ctx.lineTo(this.x + shakeX + 8, this.y + shakeY + 8);
-        ctx.lineTo(this.x + shakeX + 4, this.y + shakeY + 6);
-        ctx.lineTo(this.x + shakeX, this.y + shakeY + 10);
-        ctx.lineTo(this.x + shakeX - 4, this.y + shakeY + 6);
-        ctx.closePath();
+        ctx.ellipse(this.x + shakeX, this.y + shakeY + 8, 6, 3, 0, 0, Math.PI * 2);
         ctx.fill();
         
         // 绘制生命值条
@@ -990,7 +1212,7 @@ class LightningWhip {
     }
     
     createSegments() {
-        const segments = 80; // 增加段数确保更平滑的摆动
+        const segments = 120; // 进一步增加段数确保S形更平滑
         for (let i = 0; i < segments; i++) {
             this.segments.push({
                 x: 0,
@@ -1072,42 +1294,46 @@ class LightningWhip {
         const distance = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
         
-        // 使用单一平滑的贝塞尔曲线，确保没有锐角和钝角
-        // 创建更平滑的控制点，避免分段造成的角度问题
-        
-        // 计算平滑的控制点，确保整条曲线圆滑
-        const controlPoint1X = this.startX + Math.cos(angle + Math.PI / 6) * distance * 0.4;
-        const controlPoint1Y = this.startY + Math.sin(angle + Math.PI / 6) * distance * 0.4;
-        const controlPoint2X = this.primaryTarget.x - Math.cos(angle - Math.PI / 6) * distance * 0.4;
-        const controlPoint2Y = this.primaryTarget.y - Math.sin(angle - Math.PI / 6) * distance * 0.4;
-        
+        // 创建S形闪电鞭 - 使用多个平滑的贝塞尔曲线段
         this.segments.forEach((segment, index) => {
             const t = index / (this.segments.length - 1);
             
-            // 使用单一的三次贝塞尔曲线，确保整条曲线圆滑
-            const x = this.cubicBezier(this.startX, controlPoint1X, controlPoint2X, this.primaryTarget.x, t);
-            const y = this.cubicBezier(this.startY, controlPoint1Y, controlPoint2Y, this.primaryTarget.y, t);
+            // 基础直线路径
+            const baseX = this.startX + dx * t;
+            const baseY = this.startY + dy * t;
             
-            // 添加动态摆动效果
-            const swingIntensity = 25; // 摆动强度（大幅增加摆动效果）
-            const swingFrequency = 0.8; // 摆动频率（加快一倍）
-            const swingPhase = this.time * swingFrequency;
+            // S形弯曲参数 - 调整为蛇形摆动
+            const sCurveIntensity = 10; // 进一步减小S形弯曲强度，让摆动更细腻
+            const sCurveFrequency = 4.0; // 降低弯曲频率，让摆动更慢
+            const sCurvePhase = this.time * 0.8; // 降低相位变化速度，让摆动更慢
             
             // 垂直于连线的方向
             const perpAngle = angle + Math.PI / 2;
             
-            // 鞭子摆动效果 - 使用平滑的摆动函数，避免锐角
-            const smoothSwing = Math.sin(swingPhase + t * Math.PI * 1.5) * swingIntensity * (0.3 + 0.7 * t); // 平滑摆动，从起点到终点逐渐增强
+            // 创建S形弯曲 - 使用正弦波创建平滑的S形
+            // 使用更复杂的函数来创建更自然的S形
+            const sCurve = Math.sin(t * Math.PI * sCurveFrequency + sCurvePhase) * sCurveIntensity * 
+                          (1 - Math.abs(t - 0.5) * 0.3); // 在中间部分增强S形效果
             
-            // 添加细微的随机抖动
-            const microJitter = Math.sin(this.time * 0.8 + t * Math.PI * 15 + index * 0.2) * 1 * Math.sin(t * Math.PI);
-            const randomJitter = (Math.random() - 0.5) * 0.5 * Math.sin(t * Math.PI);
+            // 添加蛇形摆动效果，增强S形
+            const snakeIntensity = 3; // 进一步减小蛇形摆动强度，让摆动更细腻
+            const snakeFrequency = 1.2; // 降低蛇形摆动频率，让摆动更慢
+            const snakePhase = this.time * snakeFrequency;
             
-            // 应用摆动和抖动
-            segment.x = x + Math.cos(perpAngle) * (smoothSwing + microJitter + randomJitter);
-            segment.y = y + Math.sin(perpAngle) * (smoothSwing + microJitter + randomJitter);
+            // 蛇形摆动，与S形结合 - 创建缓慢的波峰波谷切换
+            const snakeSwing = Math.sin(snakePhase + t * Math.PI * 6) * snakeIntensity * (0.1 + 0.2 * t);
             
-            segment.swingOffset = Math.abs(smoothSwing);
+            // 添加第二层蛇形摆动，增强波峰波谷效果
+            const snakeSwing2 = Math.sin(this.time * 1.5 + t * Math.PI * 8 + index * 0.2) * 2 * (0.03 + 0.1 * t);
+            
+            // 添加细微的随机抖动，模拟闪电的不规则性
+            const microJitter = Math.sin(this.time * 1.0 + t * Math.PI * 20 + index * 0.15) * 0.2 * Math.sin(t * Math.PI);
+            
+            // 应用S形弯曲和多层蛇形摆动
+            segment.x = baseX + Math.cos(perpAngle) * (sCurve + snakeSwing + snakeSwing2 + microJitter);
+            segment.y = baseY + Math.sin(perpAngle) * (sCurve + snakeSwing + snakeSwing2 + microJitter);
+            
+            segment.swingOffset = Math.abs(sCurve + snakeSwing + snakeSwing2);
         });
     }
     
@@ -1232,9 +1458,9 @@ class LightningWhip {
         
         // 绘制闪电鞭主体 - 紫色
         ctx.strokeStyle = '#aa00ff';
-        ctx.lineWidth = 8;
+        ctx.lineWidth = 18; // 从12增加到18，让闪电更粗
         ctx.shadowColor = '#aa00ff';
-        ctx.shadowBlur = 25;
+        ctx.shadowBlur = 40; // 增加发光效果
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         
@@ -1250,8 +1476,8 @@ class LightningWhip {
         
         // 绘制闪电鞭核心 - 更亮的紫色
         ctx.strokeStyle = '#ff00ff';
-        ctx.lineWidth = 4;
-        ctx.shadowBlur = 30;
+        ctx.lineWidth = 10; // 从6增加到10
+        ctx.shadowBlur = 45; // 增加发光效果
         
         ctx.beginPath();
         ctx.moveTo(this.startX, this.startY);
@@ -1265,8 +1491,8 @@ class LightningWhip {
         
         // 绘制闪电鞭内层 - 白色核心
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.shadowBlur = 15;
+        ctx.lineWidth = 5; // 从3增加到5
+        ctx.shadowBlur = 25; // 增加发光效果
         
         ctx.beginPath();
         ctx.moveTo(this.startX, this.startY);
@@ -1298,14 +1524,23 @@ class LightningWhip {
 
 // 子弹类
 class Bullet {
-    constructor(x, y) {
+    constructor(x, y, game) {
         this.x = x;
         this.y = y;
         this.width = 4;
         this.height = 12;
         this.speed = 8;
-        this.damage = 10; // 增加子弹伤害到10
+        this.game = game;
+        this.baseDamage = 30; // 基础伤害
+        this.damage = this.calculateDamage(); // 根据闪电等级计算伤害
         this.active = true;
+    }
+    
+    calculateDamage() {
+        // 子弹伤害随闪电等级增加，但增长速度较慢
+        const lightningLevel = this.game ? this.game.lightningLevel : 1;
+        const damageMultiplier = 1 + (lightningLevel - 1) * 0.15; // 每级增加15%，比闪电慢一些
+        return Math.floor(this.baseDamage * damageMultiplier);
     }
     
     update() {
